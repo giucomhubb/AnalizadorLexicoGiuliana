@@ -142,15 +142,12 @@ def batch_tokenize(json_input: str) -> str:
 def print_ast(node, indent=0):
     prefix = '  ' * indent
     if isinstance(node, NumberNode):
-        # Hoja: literal numérico
         print(f"{prefix}Number({node.value})")
     elif isinstance(node, BinaryOpNode):
-        # Nodo interno: muestra el operador y luego recorre hijos
         print(f"{prefix}BinaryOp('{node.op}')")
         print_ast(node.left,  indent+1)
         print_ast(node.right, indent+1)
     else:
-        # Si luego añades otros nodos (p.ej. UnaryOp, Assign), extiéndelo aquí
         print(f"{prefix}{node!r}")
 
 
