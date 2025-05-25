@@ -1,9 +1,11 @@
+#a01562646 Giuliana Herrera Lopez
 import re
 import json
 from dataclasses import dataclass
 from typing import List, Dict, Any
 
-# Define and compile the token types
+
+# types of tokens
 tokenTypes = [
     ('NUMBER',     r'\d+'),
     ('PLUS',       r'\+'),
@@ -20,14 +22,86 @@ compiledTokenTypes = [
     for name, pattern in tokenTypes
 ]
 
+#class
 @dataclass
 class Token:
     type: str
     value: str
-
     def to_dict(self) -> Dict[str, Any]:
         return {"type": self.type, "value": self.value}
+@dataclass
+class NumberNode:
+    value: str
 
+@dataclass
+class BinaryOpNode:
+    op: str
+    left: Any
+    right: Any
+    
+@dataclass
+class Parser:
+    def __init__(self, tokens: List[Token]):
+        self.tokens = tokens
+        self.current_token_index = 0
+    
+    def lookahead(self):
+        if self.current_token_index < len(self.tokens):
+            return self.tokens[self.current_token_index]
+        else:
+            return Token('EOF', '')
+    def consume(self, expected_type: str):
+        tok=self.lookahead()
+        if tok.type == expected_type:
+            self.current_token_index += 1
+            return tok
+        else:
+            raise SyntaxError(f"Expected token type {expected_type}, but got {tok.type} instead.")
+    def parse_term(self):
+        node = self.parse_factor()
+        while True:
+            tok = self.lookahead()
+            if tok.type in ('STAR', 'SLASH'):
+                op = self.consume(tok.type)
+                right = self.parse_factor()
+                node = BinaryOpNode(op.value, node, right)
+            else:
+                break
+        return node
+    def parse_expression(self):
+        node = self.parse_term()
+        while True:
+            tok = self.lookahead()
+            if tok.type in ('PLUS', 'MINUS'):
+                op = self.consume(tok.type)
+                right = self.parse_term()
+                node = BinaryOpNode(op.value, node, right)
+            else:
+                break
+        return node 
+    def parse_factor(self):
+        tok = self.lookahead()
+        if tok.type == 'NUMBER':
+            self.consume('NUMBER')
+            return NumberNode(tok.value)
+        elif tok.type == 'LPAREN':
+            self.consume('LPAREN')
+            node = self.parse_expression()
+            self.consume('RPAREN')
+            return node
+        else:
+            raise SyntaxError(f"Unexpected token {tok.type} at position {self.current_token_index}")
+
+    def parse(self):
+        node = self.parse_expression()
+        if self.lookahead().type != 'EOF':
+            raise SyntaxError("Tokens inesperados tras expresión: " +
+                          self.lookahead().type)
+        return node
+
+   
+
+# Tokenizer function
 def tokenize(text: str) -> List[Token]:
     tokens: List[Token] = []
     pos = 0
@@ -65,21 +139,31 @@ def batch_tokenize(json_input: str) -> str:
         result.append([t.to_dict() for t in token_list])
     return json.dumps(result, indent=2)
 
-#  JSON input with 4 test cases
-json_input = json.dumps([
-    "23 + (5 - 2) / 10",
-    "7 * 8 - 9",
-    "12 +    34",
-    "111-111",
-    "bad$char"
-])
+def print_ast(node, indent=0):
+    prefix = '  ' * indent
+    if isinstance(node, NumberNode):
+        # Hoja: literal numérico
+        print(f"{prefix}Number({node.value})")
+    elif isinstance(node, BinaryOpNode):
+        # Nodo interno: muestra el operador y luego recorre hijos
+        print(f"{prefix}BinaryOp('{node.op}')")
+        print_ast(node.left,  indent+1)
+        print_ast(node.right, indent+1)
+    else:
+        # Si luego añades otros nodos (p.ej. UnaryOp, Assign), extiéndelo aquí
+        print(f"{prefix}{node!r}")
 
 
-output_json = batch_tokenize(json_input)
-print("Input JSON:")
-print(json_input)
-print("\nOutput JSON:")
-print(output_json)
+# example usage 
+text = "3 + 4 * (2 - 1) / 55"
+tokens = tokenize(text)
+print("Tokens:")
+for t in tokens:
+    print(f"  {t.type:6} → {t.value!r}")
+parser = Parser(tokens)
+print_ast(parser.parse())
+
+
 
 
 
