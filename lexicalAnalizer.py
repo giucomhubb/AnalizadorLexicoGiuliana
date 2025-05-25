@@ -125,9 +125,7 @@ def tokenize(text: str) -> List[Token]:
     return tokens
 
 def batch_tokenize(json_input: str) -> str:
-    """
-    Expects a JSON array of string expressions, returns a JSON array of token lists.
-    """
+    
     expressions = json.loads(json_input)
     result = []
     for expr in expressions:
