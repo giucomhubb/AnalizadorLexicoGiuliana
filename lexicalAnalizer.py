@@ -3,8 +3,28 @@ import re
 import json
 from dataclasses import dataclass
 from typing import List, Dict, Any
-
-
+#grammar definition
+grammar = {
+    'Expr': [
+        ['Term', 'ExprTail'],
+    ],
+    'ExprTail': [
+        ['PLUS', 'Term', 'ExprTail'],
+        ['MINUS', 'Term', 'ExprTail'],
+    ],
+    'Term': [
+        ['Factor', 'TermTail'],
+    ],
+    'TermTail': [
+        ['STAR', 'Factor', 'TermTail'],
+        ['SLASH', 'Factor', 'TermTail'],
+        []
+    ],
+    'Factor': [
+        ['NUMBER'],
+        ['LPAREN', 'Expr', 'RPAREN'],
+    ],
+}
 # types of tokens
 tokenTypes = [
     ('NUMBER',     r'\d+'),
@@ -95,7 +115,7 @@ class Parser:
     def parse(self):
         node = self.parse_expression()
         if self.lookahead().type != 'EOF':
-            raise SyntaxError("Tokens inesperados tras expresión: " +
+            raise SyntaxError("Unexpected tokens: " +
                           self.lookahead().type)
         return node
 
