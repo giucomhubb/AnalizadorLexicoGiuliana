@@ -1,199 +1,273 @@
 # a01562646 Giuliana Herrera Lopez
-import itertools
+
+import re
 from dataclasses import dataclass
-from typing import List, Dict, Union, Any, Optional
+from typing import List, Any, Union
 
 
+tokenTypes = [
+    ('NUMBER',     r'\d+'),
+    ('PLUS',       r'\+'),
+    ('MINUS',      r'-'),
+    ('LPAREN',     r'\('),
+    ('RPAREN',     r'\)'),
+    ('SLASH',      r'/'),
+    ('STAR',       r'\*'),
+    ('EQUALS',     r'='),
+    ('IDENT',      r'[A-Za-z_]\w*'),
+    ('WHITESPACE', r'\s+'),
+]
 
-class ASTNode:
-    pass
-
-@dataclass
-class VarDeclNode(ASTNode):
-    name: str
-
-@dataclass
-class AssignNode(ASTNode):
-    target: str
-    expr: ASTNode
-
-@dataclass
-class BinaryOpNode(ASTNode):
-    op: str                
-    left: ASTNode
-    right: ASTNode
-
-@dataclass
-class NumberNode(ASTNode):
-    value: int
+compiledTokenTypes = [
+    (name, re.compile(rf'^{pattern}'))
+    for name, pattern in tokenTypes
+]
 
 @dataclass
-class IdentifierNode(ASTNode):
-    name: str
+class Token:
+    type: str
+    value: str
+
+def tokenize(text: str) -> List[Token]:
+    tokens: List[Token] = []
+    pos = 0
+    length = len(text)
+    while pos < length:
+        for name, regex in compiledTokenTypes:
+            match = regex.match(text[pos:])
+            if not match:
+                continue
+            lexeme = match.group(0)
+            if name != 'WHITESPACE':
+                tokens.append(Token(name, lexeme))
+            pos += len(lexeme)
+            break
+        else:
+            raise SyntaxError(f"Carácter inesperado '{text[pos]}' en la posición {pos}.")
+    tokens.append(Token('EOF', ''))
+    return tokens
 
 
-ProgramAST = List[ASTNode]
+@dataclass
+class NumberNode:
+    value: Union[int, float]
+
+@dataclass
+class BinaryOpNode:
+    op: str         
+    left: Any       
+    right: Any       
+
+@dataclass
+class AssignNode:
+    var_name: str   
+    expr: Any       
 
 
-class SymbolTable:
+class Parser:
+    def __init__(self, tokens: List[Token]):
+        self.tokens = tokens
+        self.current_token_index = 0
+
+    def lookahead(self) -> Token:
+        if self.current_token_index < len(self.tokens):
+            return self.tokens[self.current_token_index]
+        return Token('EOF', '')
+
+    def consume(self, expected_type: str) -> Token:
+        tok = self.lookahead()
+        if tok.type != expected_type:
+            raise SyntaxError(
+                f"Token esperado '{expected_type}', pero '{tok.type}' "
+                f"en la posición {self.current_token_index}."
+            )
+        self.current_token_index += 1
+        return tok
+
+    def parse_statement(self) -> Any:
+
+        if self.lookahead().type == 'IDENT':
+            var_token = self.consume('IDENT')
+            if self.lookahead().type == 'EQUALS':
+                self.consume('EQUALS')
+                expr_node = self.parse_expression()
+                return AssignNode(var_token.value, expr_node)
+            else:
+                self.current_token_index -= 1
+        return self.parse_expression()
+
+    def parse_expression(self) -> Any:
+        node = self.parse_term()
+        while self.lookahead().type in ('PLUS', 'MINUS'):
+            op = self.consume(self.lookahead().type)
+            right = self.parse_term()
+            node = BinaryOpNode(op.value, node, right)
+        return node
+
+    def parse_term(self) -> Any:
+        node = self.parse_factor()
+        while True:
+            tok = self.lookahead()
+            if tok.type in ('STAR', 'SLASH'):
+                op = self.consume(tok.type)
+                right = self.parse_factor()
+                node = BinaryOpNode(op.value, node, right)
+            elif tok.type == 'LPAREN':
+                right = self.parse_factor()
+                node = BinaryOpNode('*', node, right)
+            else:
+                break
+        return node
+
+    def parse_factor(self) -> Any:
+        tok = self.lookahead()
+        if tok.type == 'NUMBER':
+            self.consume('NUMBER')
+            return NumberNode(int(tok.value))
+        elif tok.type == 'LPAREN':
+            self.consume('LPAREN')
+            node = self.parse_expression()
+            self.consume('RPAREN')
+            return node
+        else:
+            raise SyntaxError(
+                f"Token inesperado '{tok.type}' en la posición {self.current_token_index}."
+            )
+
+    def parse(self) -> Any:
+        node = self.parse_statement()
+        if self.lookahead().type != 'EOF':
+            raise SyntaxError(
+                f"Token inesperado '{self.lookahead().type}' al final de la entrada."
+            )
+        return node
+
+
+def print_ast(node: Any, indent: int = 0) -> None:
+    prefix = '  ' * indent
+    if isinstance(node, NumberNode):
+        print(f"{prefix}Number({node.value})")
+    elif isinstance(node, BinaryOpNode):
+        print(f"{prefix}BinaryOp('{node.op}')")
+        print_ast(node.left, indent + 1)
+        print_ast(node.right, indent + 1)
+    elif isinstance(node, AssignNode):
+        print(f"{prefix}Assign('{node.var_name}', )")
+        print_ast(node.expr, indent + 1)
+    else:
+        print(f"{prefix}{node!r}")
+
+
+
+def semantic_check_ast(ast: Any, sym_table: dict = None) -> Union[None, str]:
+
+    if sym_table is None:
+        sym_table = {}
+
+
+    if isinstance(ast, AssignNode):
+
+        err_expr = semantic_check_ast(ast.expr, sym_table)
+        if err_expr:
+            return err_expr
     
-    def __init__(self):
-        self._symbols: Dict[str, str] = {}
-
-    def declare(self, name: str, type_name: str) -> Optional[str]:
-        if name in self._symbols:
-            return f"Variable '{name}' ya declarada"
-        self._symbols[name] = type_name
+        sym_table[ast.var_name] = True
         return None
 
-    def is_declared(self, name: str) -> bool:
-        return name in self._symbols
+    if isinstance(ast, NumberNode):
+        return None
 
-    def get_type(self, name: str) -> Optional[str]:
-        return self._symbols.get(name, None)
-
-
-class SemanticAnalyzer:
-
-    def __init__(self):
-        self.symbol_table = SymbolTable()
-        self.errors: List[str] = []
-
-    def analyze(self, program: ProgramAST) -> List[str]:
-        for stmt in program:
-            self._analyze_node(stmt)
-        return self.errors
-
-    def _analyze_node(self, node: ASTNode) -> None:
-        if isinstance(node, VarDeclNode):
-            err = self.symbol_table.declare(node.name, 'int')
-            if err:
-                self.errors.append(f"Error semántico: {err}")
-            return
-
-        if isinstance(node, AssignNode):
-            if not self.symbol_table.is_declared(node.target):
-                self.errors.append(f"Error semántico: Variable '{node.target}' no declarada")
-            self._analyze_node(node.expr)
-            return
-
-        if isinstance(node, BinaryOpNode):
-            self._analyze_node(node.left)
-            self._analyze_node(node.right)
-            return
-
-        if isinstance(node, NumberNode):
-            return
-
-        if isinstance(node, IdentifierNode):
-            if not self.symbol_table.is_declared(node.name):
-                self.errors.append(f"Error semántico: Variable '{node.name}' no declarada")
-            return
-
+    if isinstance(ast, BinaryOpNode):
     
-        self.errors.append(f"Error semántico: Nodo inesperado {node!r}")
-
-
-
-
-class IntermediateCode:
-
-    def __init__(self):
-        self.instructions: List[str] = []
-
-    def emit(self, instr: str) -> None:
-        self.instructions.append(instr)
-
-    def __iter__(self):
-        return iter(self.instructions)
-
-
-class CodeGenerator:
+        err_left = semantic_check_ast(ast.left, sym_table)
+        if err_left:
+            return err_left
+      
+        err_right = semantic_check_ast(ast.right, sym_table)
+        if err_right:
+            return err_right
   
-    def __init__(self):
-        self.temp_count = itertools.count(1)
-        self.code = IntermediateCode()
+        if ast.op == '/' and isinstance(ast.right, NumberNode) and ast.right.value == 0:
+            return "Error semántico: división por cero detectada en AST."
+        return None
 
-    def new_temp(self) -> str:
-        return f"t{next(self.temp_count)}"
+    return None
 
-    def generate(self, program: ProgramAST) -> IntermediateCode:
-        for stmt in program:
-            self._gen_node(stmt)
-        return self.code
 
-    def _gen_node(self, node: ASTNode) -> Optional[str]:
-        if isinstance(node, VarDeclNode):
-           
-            self.code.emit(f"declare {node.name}")
-            return None
+def evaluate(node: Any, sym_values: dict = None) -> Union[int, float, dict]:
 
-        if isinstance(node, AssignNode):
-          
-            rhs_temp = self._gen_node(node.expr)
-            
-            if rhs_temp is None and isinstance(node.expr, NumberNode):
-                self.code.emit(f"{node.target} = {node.expr.value}")
-            else:
-                self.code.emit(f"{node.target} = {rhs_temp}")
-            return None
+    if sym_values is None:
+        sym_values = {}
 
-        if isinstance(node, BinaryOpNode):
-            
-            left_temp = self._gen_node(node.left)
-            right_temp = self._gen_node(node.right)
+    if isinstance(node, NumberNode):
+        return node.value
 
-            if left_temp is None and isinstance(node.left, NumberNode):
-                left_repr = str(node.left.value)
-            else:
-                left_repr = left_temp
+    if isinstance(node, BinaryOpNode):
+        left_val = evaluate(node.left, sym_values)
+        right_val = evaluate(node.right, sym_values)
+        if node.op == '+':
+            return left_val + right_val
+        if node.op == '-':
+            return left_val - right_val
+        if node.op == '*':
+            return left_val * right_val
+        if node.op == '/':
+            if right_val == 0:
+                raise ZeroDivisionError("División por cero en tiempo de ejecución.")
+            return left_val / right_val
+        raise Exception(f"Operador desconocido '{node.op}'")
 
-            if right_temp is None and isinstance(node.right, NumberNode):
-                right_repr = str(node.right.value)
-            else:
-                right_repr = right_temp
+    if isinstance(node, AssignNode):
+        val = evaluate(node.expr, sym_values)
+        sym_values[node.var_name] = val
+        return sym_values
 
-            t = self.new_temp()
-            self.code.emit(f"{t} = {left_repr} {node.op} {right_repr}")
-            return t
-
-        if isinstance(node, NumberNode):
-            return None
-
-        if isinstance(node, IdentifierNode):
-            return node.name
-
-        raise RuntimeError(f"Código intermedio: nodo inesperado {node!r}")
+    raise Exception("Nodo AST inválido")
 
 
 if __name__ == "__main__":
-    program_ast: ProgramAST = [
-        VarDeclNode(name="x"),
-        AssignNode(
-            target="x",
-            expr=BinaryOpNode(
-                op="+",
-                left=NumberNode(5),
-                right=NumberNode(2)
-            )
-        ),
-    ]
+   
+    expression_to_test = "y = 3 + 4(2 - 1) / 55"
+
+    print(f"Expresión a analizar: {expression_to_test}\n")
+
+    try:
+        tokens = tokenize(expression_to_test)
+        print("Tokens generados:")
+        for t in tokens[:-1]:
+            print(f"  {t.type:6} → {t.value!r}")
+    except SyntaxError as e:
+        print(f"Error léxico: {e}")
+        exit(1)
+
+    try:
+        parser = Parser(tokens)
+        ast = parser.parse()
+        print("\nAST generado:")
+        print_ast(ast)
+    except SyntaxError as e:
+        print(f"\nError sintáctico: {e}")
+        exit(1)
 
 
-    sem = SemanticAnalyzer()
-    errors = sem.analyze(program_ast)
-    if errors:
-        print("Errores semánticos encontrados:")
-        for err in errors:
-            print("  -", err)
-    else:
-        print("Sin errores semánticos.\n")
-        gen = CodeGenerator()
-        ic = gen.generate(program_ast)
+    sem_error = semantic_check_ast(ast, sym_table={})
+    if sem_error:
+        print(f"\n{sem_error}")
+        exit(1)
 
-        print("Código intermedio generado:")
-        for instr in ic:
-            print(" ", instr)
+    try:
+        resultado = evaluate(ast, sym_values={})
+        if isinstance(resultado, dict):
+            print("\nNo se encontraron errores semánticos.")
+            print("Valores de variables después de la ejecución:")
+            for var, val in resultado.items():
+                print(f"  {var} = {val}")
+        else:
+            print(f"\nNo se encontraron errores semánticos. Resultado = {resultado}")
+    except ZeroDivisionError as e:
+        print(f"\nError semántico en tiempo de ejecución: {e}")
+        exit(1)
+
 
 
 
